@@ -1,0 +1,15 @@
+# Секреты
+.env
+
+# Локальное состояние бота
+polls.json
+polls.json.tmp
+
+# IDE
+.idea/
+
+# Сборки
+*.exe
+volleyball_bot
+/bin/
+/pkg/
