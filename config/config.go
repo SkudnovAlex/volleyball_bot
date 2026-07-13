@@ -59,12 +59,13 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		BotToken:  token,
-		ChatID:    chatID,
-		StorePath: getenvDefault("STORE_PATH", defaultStorePath),
-		Schedule:  getenvDefault("CRON_SCHEDULE", defaultSchedule),
-		Location:  loc,
-		GameDays:  gameDays,
+		BotToken:        token,
+		ChatID:          chatID,
+		StorePath:       getenvDefault("STORE_PATH", defaultStorePath),
+		Schedule:        getenvDefault("CRON_SCHEDULE", defaultSchedule),
+		CleanupSchedule: getenvDefault("CLEANUP_SCHEDULE", defaultCleanupSchedule),
+		Location:        loc,
+		GameDays:        gameDays,
 	}, nil
 }
 

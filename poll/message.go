@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// gameDate возвращает дату игры через daysAhead дней в gameHour:00.
+// gameDate возвращает дату игры через createDaysAhead дней в gameHour:00.
 func gameDate(now time.Time) time.Time {
-	d := now.AddDate(0, 0, daysAhead)
+	d := now.AddDate(0, 0, createDaysAhead)
 	return time.Date(d.Year(), d.Month(), d.Day(), gameHour, 0, 0, 0, d.Location())
 }
 

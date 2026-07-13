@@ -74,13 +74,23 @@ func wednesday() time.Time {
 	return time.Date(2026, time.July, 1, 20, 0, 0, 0, time.UTC)
 }
 
-func TestCheckAndCreatePoll_NonGameDay(t *testing.T) {
+func countType[T tgbotapi.Chattable](reqs []tgbotapi.Chattable) int {
+	n := 0
+	for _, r := range reqs {
+		if _, ok := r.(T); ok {
+			n++
+		}
+	}
+	return n
+}
+
+func TestCreatePoll_NonGameDay(t *testing.T) {
 	sender := &mockSender{}
 	repo := &mockRepo{}
 	svc := New(sender, repo, 1, time.UTC, testGameDays)
 	svc.now = wednesday
 
-	svc.CheckAndCreatePoll()
+	svc.CreatePoll()
 
 	if len(sender.sent) != 0 {
 		t.Fatalf("в нерабочий день опрос не должен отправляться, отправлено: %d", len(sender.sent))
@@ -90,7 +100,7 @@ func TestCheckAndCreatePoll_NonGameDay(t *testing.T) {
 	}
 }
 
-func TestCheckAndCreatePoll_GameDay(t *testing.T) {
+func TestCreatePoll_GameDay(t *testing.T) {
 	sender := &mockSender{
 		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 555}, nil
@@ -100,7 +110,7 @@ func TestCheckAndCreatePoll_GameDay(t *testing.T) {
 	svc := New(sender, repo, 42, time.UTC, testGameDays)
 	svc.now = tuesday
 
-	svc.CheckAndCreatePoll()
+	svc.CreatePoll()
 
 	if len(sender.sent) != 1 {
 		t.Fatalf("ожидалась отправка одного опроса, получено: %d", len(sender.sent))
@@ -116,48 +126,128 @@ func TestCheckAndCreatePoll_GameDay(t *testing.T) {
 		t.Errorf("неверное число вариантов: %d", len(pollCfg.Options))
 	}
 
-	// Закрепление было запрошено.
-	if len(sender.requested) != 1 {
-		t.Fatalf("ожидался один запрос (pin), получено: %d", len(sender.requested))
+	// Закрепление было запрошено, удаление — нет.
+	if countType[tgbotapi.PinChatMessageConfig](sender.requested) != 1 {
+		t.Fatalf("ожидался один запрос на закрепление, requested=%+v", sender.requested)
 	}
-	if _, ok := sender.requested[0].(tgbotapi.PinChatMessageConfig); !ok {
-		t.Errorf("ожидался PinChatMessageConfig, получено: %T", sender.requested[0])
+	if countType[tgbotapi.DeleteMessageConfig](sender.requested) != 0 {
+		t.Fatalf("создание не должно ничего удалять")
 	}
 
-	// Опрос сохранён с верным ID.
-	if len(repo.added) != 1 || repo.added[0].MessageID != 555 {
-		t.Fatalf("опрос должен быть сохранён с MessageID=555, added=%+v", repo.added)
+	// Опрос сохранён с верным ID, датой игры и флагом Pinned.
+	if len(repo.added) != 1 || repo.added[0].MessageID != 555 || !repo.added[0].Pinned {
+		t.Fatalf("опрос должен быть сохранён с MessageID=555 и Pinned=true, added=%+v", repo.added)
+	}
+	if repo.added[0].GameDate != gameDate(tuesday()).Unix() {
+		t.Errorf("GameDate = %d, ожидалось %d", repo.added[0].GameDate, gameDate(tuesday()).Unix())
 	}
 }
 
-func TestDeleteOldPolls_RemovesOldKeepsFresh(t *testing.T) {
-	now := tuesday()
-	old := storage.PinnedPoll{MessageID: 1, CreatedAt: now.AddDate(0, 0, -daysAhead-1).Unix()}
-	exactly := storage.PinnedPoll{MessageID: 2, CreatedAt: now.AddDate(0, 0, -daysAhead).Unix()}
-	fresh := storage.PinnedPoll{MessageID: 3, CreatedAt: now.AddDate(0, 0, -1).Unix()}
-
-	repo := &mockRepo{polls: []storage.PinnedPoll{old, exactly, fresh}}
+func TestCreatePoll_SkipIfAlreadyExists(t *testing.T) {
+	existing := storage.PinnedPoll{MessageID: 1, CreatedAt: tuesday().Unix(), GameDate: gameDate(tuesday()).Unix(), Pinned: true}
+	repo := &mockRepo{polls: []storage.PinnedPoll{existing}}
 	sender := &mockSender{}
 	svc := New(sender, repo, 1, time.UTC, testGameDays)
+	svc.now = tuesday
 
-	svc.deleteOldPolls(now)
+	svc.CreatePoll()
 
-	// Удалены old и exactly (>= порога), fresh остаётся.
-	if len(sender.requested) != 2 {
-		t.Fatalf("ожидалось 2 запроса на удаление, получено: %d", len(sender.requested))
+	if len(sender.sent) != 0 {
+		t.Fatalf("опрос на эту дату уже есть — создавать не нужно, отправлено: %d", len(sender.sent))
 	}
-	if len(repo.saved) != 1 {
-		t.Fatalf("ожидалось одно сохранение, получено: %d", len(repo.saved))
-	}
-	final := repo.saved[0]
-	if len(final) != 1 || final[0].MessageID != 3 {
-		t.Fatalf("в хранилище должен остаться только опрос 3, получено: %+v", final)
+	if len(repo.added) != 0 {
+		t.Fatalf("дубль не должен сохраняться")
 	}
 }
 
-func TestDeleteOldPolls_InsufficientRightsKeepsRecord(t *testing.T) {
+func TestCleanupPolls_DeletesOldKeepsToday(t *testing.T) {
 	now := tuesday()
-	old := storage.PinnedPoll{MessageID: 7, CreatedAt: now.AddDate(0, 0, -daysAhead-1).Unix()}
+	old := storage.PinnedPoll{MessageID: 1, CreatedAt: now.AddDate(0, 0, -deleteAfterDays-1).Unix(), Pinned: true}
+	exactly := storage.PinnedPoll{MessageID: 2, CreatedAt: now.AddDate(0, 0, -deleteAfterDays).Unix(), Pinned: true}
+	today := storage.PinnedPoll{MessageID: 3, CreatedAt: now.Unix(), Pinned: true}
+
+	repo := &mockRepo{polls: []storage.PinnedPoll{old, exactly, today}}
+	sender := &mockSender{}
+	svc := New(sender, repo, 1, time.UTC, testGameDays)
+	svc.now = tuesday
+
+	svc.CleanupPolls()
+
+	// Удалены old и exactly (возраст >= 7 дней), сегодняшний остаётся закреплённым.
+	if got := countType[tgbotapi.DeleteMessageConfig](sender.requested); got != 2 {
+		t.Fatalf("ожидалось 2 удаления, получено: %d", got)
+	}
+	if got := countType[tgbotapi.UnpinChatMessageConfig](sender.requested); got != 0 {
+		t.Fatalf("сегодняшний опрос не должен открепляться, откреплений: %d", got)
+	}
+	final := repo.saved[0]
+	if len(final) != 1 || final[0].MessageID != 3 || !final[0].Pinned {
+		t.Fatalf("должен остаться только опрос 3 (Pinned), получено: %+v", final)
+	}
+}
+
+func TestCleanupPolls_UnpinsYesterday(t *testing.T) {
+	now := tuesday()
+	yesterday := storage.PinnedPoll{MessageID: 9, CreatedAt: now.AddDate(0, 0, -1).Unix(), Pinned: true}
+
+	repo := &mockRepo{polls: []storage.PinnedPoll{yesterday}}
+	sender := &mockSender{}
+	svc := New(sender, repo, 1, time.UTC, testGameDays)
+	svc.now = tuesday
+
+	svc.CleanupPolls()
+
+	if got := countType[tgbotapi.UnpinChatMessageConfig](sender.requested); got != 1 {
+		t.Fatalf("ожидалось 1 открепление, получено: %d", got)
+	}
+	if got := countType[tgbotapi.DeleteMessageConfig](sender.requested); got != 0 {
+		t.Fatalf("вчерашний опрос не должен удаляться, удалений: %d", got)
+	}
+	final := repo.saved[0]
+	if len(final) != 1 || final[0].MessageID != 9 || final[0].Pinned {
+		t.Fatalf("опрос 9 должен остаться с Pinned=false, получено: %+v", final)
+	}
+}
+
+func TestCleanupPolls_KeepsTodayPinned(t *testing.T) {
+	now := tuesday()
+	today := storage.PinnedPoll{MessageID: 5, CreatedAt: now.Unix(), Pinned: true}
+
+	repo := &mockRepo{polls: []storage.PinnedPoll{today}}
+	sender := &mockSender{}
+	svc := New(sender, repo, 1, time.UTC, testGameDays)
+	svc.now = tuesday
+
+	svc.CleanupPolls()
+
+	if len(sender.requested) != 0 {
+		t.Fatalf("сегодняшний опрос трогать не нужно, requested=%+v", sender.requested)
+	}
+	final := repo.saved[0]
+	if len(final) != 1 || !final[0].Pinned {
+		t.Fatalf("сегодняшний опрос должен остаться закреплённым, получено: %+v", final)
+	}
+}
+
+func TestCleanupPolls_AlreadyUnpinnedSkipsUnpin(t *testing.T) {
+	now := tuesday()
+	yesterday := storage.PinnedPoll{MessageID: 8, CreatedAt: now.AddDate(0, 0, -1).Unix(), Pinned: false}
+
+	repo := &mockRepo{polls: []storage.PinnedPoll{yesterday}}
+	sender := &mockSender{}
+	svc := New(sender, repo, 1, time.UTC, testGameDays)
+	svc.now = tuesday
+
+	svc.CleanupPolls()
+
+	if len(sender.requested) != 0 {
+		t.Fatalf("уже откреплённый опрос трогать не нужно, requested=%+v", sender.requested)
+	}
+}
+
+func TestCleanupPolls_InsufficientRightsKeepsRecord(t *testing.T) {
+	now := tuesday()
+	old := storage.PinnedPoll{MessageID: 7, CreatedAt: now.AddDate(0, 0, -deleteAfterDays-1).Unix(), Pinned: true}
 
 	repo := &mockRepo{polls: []storage.PinnedPoll{old}}
 	sender := &mockSender{
@@ -166,8 +256,9 @@ func TestDeleteOldPolls_InsufficientRightsKeepsRecord(t *testing.T) {
 		},
 	}
 	svc := New(sender, repo, 1, time.UTC, testGameDays)
+	svc.now = tuesday
 
-	svc.deleteOldPolls(now)
+	svc.CleanupPolls()
 
 	final := repo.saved[0]
 	if len(final) != 1 || final[0].MessageID != 7 {
@@ -175,15 +266,16 @@ func TestDeleteOldPolls_InsufficientRightsKeepsRecord(t *testing.T) {
 	}
 }
 
-func TestDeleteOldPolls_EmptyStore(t *testing.T) {
+func TestCleanupPolls_EmptyStore(t *testing.T) {
 	repo := &mockRepo{}
 	sender := &mockSender{}
 	svc := New(sender, repo, 1, time.UTC, testGameDays)
+	svc.now = tuesday
 
-	svc.deleteOldPolls(tuesday())
+	svc.CleanupPolls()
 
 	if len(sender.requested) != 0 {
-		t.Fatalf("при пустом хранилище удалений быть не должно")
+		t.Fatalf("при пустом хранилище запросов быть не должно")
 	}
 	if len(repo.saved) != 0 {
 		t.Fatalf("при пустом хранилище сохранений быть не должно")

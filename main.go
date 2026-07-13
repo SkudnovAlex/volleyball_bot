@@ -27,11 +27,16 @@ func main() {
 	store := storage.NewPollStore(cfg.StorePath)
 	svc := poll.New(bot, store, cfg.ChatID, cfg.Location, cfg.GameDays)
 
-	c, err := scheduler.Start(cfg.Schedule, cfg.Location, svc.CheckAndCreatePoll)
-	if err != nil {
-		log.Panic("Ошибка настройки cron:", err)
+	c := scheduler.New(cfg.Location)
+	if err := scheduler.Add(c, cfg.Schedule, svc.CreatePoll); err != nil {
+		log.Panic("Ошибка настройки задания создания:", err)
 	}
-	log.Printf("Планировщик запущен (расписание: %q, зона: %s)", cfg.Schedule, cfg.Location)
+	if err := scheduler.Add(c, cfg.CleanupSchedule, svc.CleanupPolls); err != nil {
+		log.Panic("Ошибка настройки задания очистки:", err)
+	}
+	c.Start()
+	log.Printf("Планировщик запущен (создание: %q, очистка: %q, зона: %s)",
+		cfg.Schedule, cfg.CleanupSchedule, cfg.Location)
 
 	scheduler.WaitForShutdown(c)
 }

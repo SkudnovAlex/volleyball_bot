@@ -5,26 +5,26 @@ import (
 	"time"
 )
 
-func TestStart_InvalidSchedule(t *testing.T) {
-	c, err := Start("not a cron", time.UTC, func() {})
-	if err == nil {
+func TestAdd_InvalidSchedule(t *testing.T) {
+	c := New(time.UTC)
+	if err := Add(c, "not a cron", func() {}); err == nil {
 		t.Fatal("ожидалась ошибка для некорректного расписания")
 	}
-	if c != nil {
-		c.Stop()
-	}
+	c.Stop()
 }
 
-func TestStart_ValidSchedule(t *testing.T) {
-	c, err := Start("* * * * *", time.UTC, func() {})
-	if err != nil {
+func TestAdd_MultipleJobs(t *testing.T) {
+	c := New(time.UTC)
+	if err := Add(c, "0 20 * * *", func() {}); err != nil {
 		t.Fatalf("неожиданная ошибка: %v", err)
 	}
-	if c == nil {
-		t.Fatal("cron не должен быть nil при валидном расписании")
+	if err := Add(c, "0 6 * * *", func() {}); err != nil {
+		t.Fatalf("неожиданная ошибка: %v", err)
 	}
-	if len(c.Entries()) != 1 {
-		t.Errorf("ожидалась 1 задача, получено: %d", len(c.Entries()))
+	c.Start()
+	defer c.Stop()
+
+	if len(c.Entries()) != 2 {
+		t.Errorf("ожидалось 2 задачи, получено: %d", len(c.Entries()))
 	}
-	c.Stop()
 }

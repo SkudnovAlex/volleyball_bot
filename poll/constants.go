@@ -3,8 +3,10 @@ package poll
 const (
 	// gameHour — час начала игры (для текста опроса).
 	gameHour = 19
-	// daysAhead — на сколько дней вперёд создаётся опрос и порог "старости" опроса.
-	daysAhead = 7
+	// createDaysAhead — на сколько дней вперёд создаётся опрос.
+	createDaysAhead = 5
+	// deleteAfterDays — опросы возрастом >= этого числа дней удаляются.
+	deleteAfterDays = 7
 )
 
 var pollOptions = []string{
