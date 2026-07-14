@@ -65,12 +65,14 @@ var testGameDays = map[time.Weekday]bool{
 }
 
 func tuesday() time.Time {
-	// 30.06.2026 — вторник (есть в testGameDays).
+	// now = 30.06.2026 (вторник); дата игры = +createDaysAhead = 05.07.2026
+	// (воскресенье) — есть в testGameDays.
 	return time.Date(2026, time.June, 30, 20, 0, 0, 0, time.UTC)
 }
 
 func wednesday() time.Time {
-	// 01.07.2026 — среда (нет в testGameDays).
+	// now = 01.07.2026 (среда); дата игры = +createDaysAhead = 06.07.2026
+	// (понедельник) — нет в testGameDays.
 	return time.Date(2026, time.July, 1, 20, 0, 0, 0, time.UTC)
 }
 

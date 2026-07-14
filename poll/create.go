@@ -9,24 +9,24 @@ import (
 	"volleyball_bot/storage"
 )
 
-// CreatePoll в игровой день создаёт новый опрос на createDaysAhead дней вперёд
-// и закрепляет его, если опроса на эту дату ещё нет.
+// CreatePoll создаёт и закрепляет опрос, если дата через createDaysAhead дней
+// приходится на игровой день и опроса на эту дату ещё нет.
 func (s *Service) CreatePoll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := s.now()
-	todayWeekday := now.Weekday()
-
-	log.Printf("Проверка: сегодня %s (%s)", now.Format("02.01.2006"), weekdays[todayWeekday.String()])
-
-	if !s.gameDays[todayWeekday] {
-		log.Printf("Сегодня (%s) игры нет, пропускаем", weekdays[todayWeekday.String()])
-		return
-	}
 
 	// Дата игры через createDaysAhead дней в gameHour:00.
 	date := gameDate(now)
+	gameWeekday := date.Weekday()
+
+	log.Printf("Проверка: дата игры %s (%s)", date.Format("02.01.2006"), weekdays[gameWeekday.String()])
+
+	if !s.gameDays[gameWeekday] {
+		log.Printf("На %s (%s) игры нет, пропускаем", date.Format("02.01.2006"), weekdays[gameWeekday.String()])
+		return
+	}
 
 	// Не создаём дубль, если опрос на эту дату уже есть.
 	polls, err := s.repo.Load()
@@ -39,7 +39,7 @@ func (s *Service) CreatePoll() {
 		return
 	}
 
-	log.Printf("Сегодня (%s) игра! Создаём опрос на %s...", weekdays[todayWeekday.String()], date.Format("02.01.2006"))
+	log.Printf("Создаём опрос на %s (%s)...", date.Format("02.01.2006"), weekdays[gameWeekday.String()])
 
 	question := getQuestion(date)
 	pollConfig := tgbotapi.SendPollConfig{
