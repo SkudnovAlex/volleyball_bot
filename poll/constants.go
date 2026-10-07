@@ -4,7 +4,7 @@ const (
 	// gameHour — час начала игры (для текста опроса).
 	gameHour = 19
 	// createDaysAhead — на сколько дней вперёд создаётся опрос.
-	createDaysAhead = 5
+	createDaysAhead = 7
 	// deleteAfterDays — опросы возрастом >= этого числа дней удаляются.
 	deleteAfterDays = 7
 )
