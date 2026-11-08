@@ -65,14 +65,14 @@ var testGameDays = map[time.Weekday]bool{
 }
 
 func tuesday() time.Time {
-	// now = 30.06.2026 (вторник); дата игры = +createDaysAhead = 05.07.2026
-	// (воскресенье) — есть в testGameDays.
+	// now = 30.06.2026 (вторник); дата игры = +createDaysAhead = 07.07.2026
+	// (вторник) — есть в testGameDays.
 	return time.Date(2026, time.June, 30, 20, 0, 0, 0, time.UTC)
 }
 
 func wednesday() time.Time {
-	// now = 01.07.2026 (среда); дата игры = +createDaysAhead = 06.07.2026
-	// (понедельник) — нет в testGameDays.
+	// now = 01.07.2026 (среда); дата игры = +createDaysAhead = 08.07.2026
+	// (среда) — нет в testGameDays.
 	return time.Date(2026, time.July, 1, 20, 0, 0, 0, time.UTC)
 }
 
@@ -188,11 +188,16 @@ func TestCleanupPolls_DeletesOldKeepsToday(t *testing.T) {
 	}
 }
 
-func TestCleanupPolls_UnpinsYesterday(t *testing.T) {
+func TestCleanupPolls_UnpinsPastGame(t *testing.T) {
 	now := tuesday()
-	yesterday := storage.PinnedPoll{MessageID: 9, CreatedAt: now.AddDate(0, 0, -1).Unix(), Pinned: true}
+	past := storage.PinnedPoll{
+		MessageID: 9,
+		CreatedAt: now.AddDate(0, 0, -6).Unix(),
+		GameDate:  gameDate(now.AddDate(0, 0, -createDaysAhead-1)).Unix(),
+		Pinned:    true,
+	}
 
-	repo := &mockRepo{polls: []storage.PinnedPoll{yesterday}}
+	repo := &mockRepo{polls: []storage.PinnedPoll{past}}
 	sender := &mockSender{}
 	svc := New(sender, repo, 1, time.UTC, testGameDays)
 	svc.now = tuesday
@@ -203,7 +208,7 @@ func TestCleanupPolls_UnpinsYesterday(t *testing.T) {
 		t.Fatalf("ожидалось 1 открепление, получено: %d", got)
 	}
 	if got := countType[tgbotapi.DeleteMessageConfig](sender.requested); got != 0 {
-		t.Fatalf("вчерашний опрос не должен удаляться, удалений: %d", got)
+		t.Fatalf("опрос моложе deleteAfterDays не должен удаляться, удалений: %d", got)
 	}
 	final := repo.saved[0]
 	if len(final) != 1 || final[0].MessageID != 9 || final[0].Pinned {
@@ -211,9 +216,35 @@ func TestCleanupPolls_UnpinsYesterday(t *testing.T) {
 	}
 }
 
+func TestCleanupPolls_KeepsUpcomingGamePinned(t *testing.T) {
+	now := tuesday()
+	// Создан вчера, игра через 6 дней: должен остаться закреплённым.
+	upcoming := storage.PinnedPoll{
+		MessageID: 4,
+		CreatedAt: now.AddDate(0, 0, -1).Unix(),
+		GameDate:  gameDate(now.AddDate(0, 0, -1)).Unix(),
+		Pinned:    true,
+	}
+
+	repo := &mockRepo{polls: []storage.PinnedPoll{upcoming}}
+	sender := &mockSender{}
+	svc := New(sender, repo, 1, time.UTC, testGameDays)
+	svc.now = tuesday
+
+	svc.CleanupPolls()
+
+	if len(sender.requested) != 0 {
+		t.Fatalf("опрос на будущую игру трогать не нужно, requested=%+v", sender.requested)
+	}
+	if final := repo.saved[0]; len(final) != 1 || !final[0].Pinned {
+		t.Fatalf("опрос на будущую игру должен остаться закреплённым, получено: %+v", final)
+	}
+}
+
 func TestCleanupPolls_KeepsTodayPinned(t *testing.T) {
 	now := tuesday()
-	today := storage.PinnedPoll{MessageID: 5, CreatedAt: now.Unix(), Pinned: true}
+	// Игра сегодня: до конца дня опрос остаётся закреплённым.
+	today := storage.PinnedPoll{MessageID: 5, CreatedAt: now.AddDate(0, 0, -createDaysAhead+1).Unix(), GameDate: gameDate(now.AddDate(0, 0, -createDaysAhead)).Unix(), Pinned: true}
 
 	repo := &mockRepo{polls: []storage.PinnedPoll{today}}
 	sender := &mockSender{}
@@ -233,7 +264,7 @@ func TestCleanupPolls_KeepsTodayPinned(t *testing.T) {
 
 func TestCleanupPolls_AlreadyUnpinnedSkipsUnpin(t *testing.T) {
 	now := tuesday()
-	yesterday := storage.PinnedPoll{MessageID: 8, CreatedAt: now.AddDate(0, 0, -1).Unix(), Pinned: false}
+	yesterday := storage.PinnedPoll{MessageID: 8, CreatedAt: now.AddDate(0, 0, -6).Unix(), GameDate: gameDate(now.AddDate(0, 0, -createDaysAhead-1)).Unix(), Pinned: false}
 
 	repo := &mockRepo{polls: []storage.PinnedPoll{yesterday}}
 	sender := &mockSender{}

@@ -7,7 +7,7 @@ import (
 	"volleyball_bot/storage"
 )
 
-// CleanupPolls открепляет опросы, созданные вчера и ранее, и удаляет опросы
+// CleanupPolls открепляет опросы, день игры которых прошёл, и удаляет опросы
 // возрастом >= deleteAfterDays дней. Файл хранилища затем перезаписывается.
 func (s *Service) CleanupPolls() {
 	s.mu.Lock()
@@ -40,9 +40,10 @@ func (s *Service) CleanupPolls() {
 			continue
 		}
 
-		// 2. Открепление: создан раньше сегодняшнего дня и ещё закреплён.
-		created := time.Unix(p.CreatedAt, 0).In(now.Location())
-		if p.Pinned && created.Before(startOfToday) {
+		// 2. Открепление: день игры уже прошёл, а опрос ещё закреплён.
+		// Записи без GameDate не открепляем, их уберёт удаление по возрасту.
+		game := time.Unix(p.GameDate, 0).In(now.Location())
+		if p.Pinned && p.GameDate != 0 && game.Before(startOfToday) {
 			if s.unpinMessage(p) {
 				p.Pinned = false
 			}
